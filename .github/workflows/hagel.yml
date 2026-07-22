@@ -39,4 +39,4 @@ jobs:
           password: ${{ secrets.FTP_PASS }}
           port: 22
           local_path: './out/*'
-          remote_path: '/www/'
+          remote_path: 'www/'
