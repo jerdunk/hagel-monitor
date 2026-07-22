@@ -1,17 +1,26 @@
 name: Hagelmonitor
+
 on:
   schedule:
     - cron: "*/5 * * * *"    # elke 5 minuten (UTC)
-  workflow_dispatch:          # ook handmatig te starten
+  workflow_dispatch:          # ook handmatig te starten via de Actions-tab
+
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
-      - run: pip install -r requirements.txt
-      - name: Bereken hagelstatus
+      - name: Repo uitchecken
+        uses: actions/checkout@v4
+
+      - name: Python installeren
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Dependencies installeren
+        run: pip install -r requirements.txt
+
+      - name: Hagelstatus berekenen
         env:
           KNMI_API_KEY: ${{ secrets.KNMI_API_KEY }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
@@ -21,12 +30,13 @@ jobs:
           ALERT_FROM: ${{ secrets.ALERT_FROM }}
           ALERT_TO: ${{ secrets.ALERT_TO }}
         run: python hagel_monitor.py
-      - name: Upload JSON naar TransIP via FTPS
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+
+      - name: JSON uploaden naar TransIP via SFTP
+        uses: wlixcc/SFTP-Deploy-Action@v1.2.4
         with:
           server: ${{ secrets.FTP_HOST }}
           username: ${{ secrets.FTP_USER }}
           password: ${{ secrets.FTP_PASS }}
-          protocol: ftps
-          local-dir: ./out/
-          server-dir: ./     # map waar je website staat (vaak /www/ of /public_html/)
+          port: 22
+          local_path: './out/*'
+          remote_path: '/www/'
