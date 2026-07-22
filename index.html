@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hagelmonitor Nederland — jeroendunk.nl</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+  body{font-family:system-ui,Arial,sans-serif;margin:0;background:#0f1720;color:#e7edf3}
+  header{padding:14px 18px;background:#14202e;border-bottom:1px solid #223}
+  h1{font-size:18px;margin:0} .sub{color:#9fb0c0;font-size:13px;margin-top:4px}
+  #map{height:60vh} .panel{padding:14px 18px;display:flex;gap:24px;flex-wrap:wrap}
+  .badge{padding:4px 10px;border-radius:6px;font-weight:600}
+  .legend i{width:14px;height:14px;display:inline-block;margin-right:6px;border-radius:3px}
+  .disc{font-size:12px;color:#9fb0c0;padding:8px 18px;background:#0b1219}
+  input[type=range]{width:260px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Hagelmonitor Nederland</h1>
+  <div class="sub">Bron: KNMI Data Platform (CC-BY-4.0) · radar via RainViewer · <b>indicatief</b></div>
+</header>
+<div id="map"></div>
+<div class="panel">
+  <div><div>Risiconiveau</div><div id="risk" class="badge">–</div></div>
+  <div><div>Geschatte steengrootte</div><div id="size">–</div></div>
+  <div><div>Actieve onweerscellen</div><div id="cells">–</div></div>
+  <div><div>Bijgewerkt</div><div id="upd">–</div></div>
+  <div class="legend"><div>Legenda</div>
+    <div><i style="background:#2ecc71"></i>laag <i style="background:#f1c40f"></i>matig
+    <i style="background:#e67e22"></i>hoog <i style="background:#e74c3c"></i>zeer hoog
+    <i style="background:#8e44ad"></i>extreem</div></div>
+</div>
+<div class="panel">
+  <label>Tijd / terugkijken:
+    <input id="time" type="range" min="0" max="0" value="0">
+    <span id="timelbl">nu</span></label>
+  <button id="loadhist">Historisch moment laden</button>
+</div>
+<p class="disc">Deze tool is indicatief en geautomatiseerd. Voor officiele weerwaarschuwingen: <a href="https://www.knmi.nl" style="color:#6cf">knmi.nl</a>. Weerdata mede via <a href="https://www.rainviewer.com/" style="color:#6cf">RainViewer</a>.</p>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map = L.map('map').setView([52.1, 5.3], 7);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  {attribution:'© OpenStreetMap', maxZoom:12}).addTo(map);
+
+// RainViewer radarlaag
+let radarLayer=null;
+fetch('https://api.rainviewer.com/public/weather-maps.json').then(r=>r.json()).then(d=>{
+  const frame=d.radar.past[d.radar.past.length-1];
+  radarLayer=L.tileLayer(`${d.host}${frame.path}/256/{z}/{x}/{y}/2/1_1.png`,{opacity:0.5}).addTo(map);
+});
+
+const COLORS=["#0000","#2ecc71","#f1c40f","#e67e22","#e74c3c","#8e44ad"];
+let gridLayer=L.layerGroup().addTo(map);
+
+function levelOf(v){ // hagelkans% -> kleurindex 0-5
+  if(v>=80)return 5; if(v>=60)return 4; if(v>=40)return 3; if(v>=20)return 2; if(v>0)return 1; return 0;
+}
+function drawGrid(data){
+  gridLayer.clearLayers();
+  const [latMin,lonMin,latMax,lonMax]=data.bbox;
+  const R=data.grid_rows,C=data.grid_cols,g=data.grid;
+  if(!g)return;
+  const dLat=(latMax-latMin)/R, dLon=(lonMax-lonMin)/C;
+  for(let i=0;i<R;i++)for(let j=0;j<C;j++){
+    const v=g[i][j], lvl=levelOf(v); if(lvl===0)continue;
+    const north=latMax-i*dLat, south=north-dLat;
+    const west=lonMin+j*dLon, east=west+dLon;
+    L.rectangle([[south,west],[north,east]],
+      {color:COLORS[lvl],weight:0,fillOpacity:0.55})
+      .bindPopup(`Hagelkans: ${Math.round(v)}% (niveau ${lvl})`).addTo(gridLayer);
+  }
+  // CellWarn cellen als omtrek
+  (data.cells||[]).forEach(c=>{ if(c.geometry) L.geoJSON(c.geometry,
+    {style:{color:'#fff',weight:2,fill:false,dashArray:'4'}}).addTo(gridLayer); });
+}
+function render(data){
+  drawGrid(data);
+  const names=["geen","laag","matig","hoog","zeer hoog","extreem"];
+  const r=document.getElementById('risk');
+  r.textContent=`${data.risk_level}/5 — ${names[data.risk_level]||''}`;
+  r.style.background=COLORS[data.risk_level]||'#333';
+  document.getElementById('size').textContent=data.estimated_size;
+  document.getElementById('cells').textContent=data.cell_count;
+  document.getElementById('upd').textContent=new Date(data.generated).toLocaleString('nl-NL');
+}
+
+// Realtime status inladen (door backend geschreven)
+function loadCurrent(){ fetch('hagel_status.json?_='+Date.now()).then(r=>r.json()).then(render); }
+loadCurrent(); setInterval(loadCurrent, 5*60*1000);
+
+// Historisch: laadt hist_<timestamp>.json (door backend gegenereerd)
+document.getElementById('loadhist').onclick=()=>{
+  const ts=prompt("Voer moment in (UTC, formaat YYYYMMDDHHMM, stappen van 5 min):","202606280100");
+  if(ts) fetch(`hist_${ts}.json?_=`+Date.now()).then(r=>r.json()).then(render)
+        .catch(()=>alert("Geen historische data voor dit moment. Genereer eerst met de backend."));
+};
+</script>
+</body>
+</html>
