@@ -1,0 +1,30 @@
+name: Backfill historisch
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Datum (YYYY-MM-DD) om te reconstrueren"
+        required: true
+        default: "2026-06-27"
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Genereer historische JSON
+        env:
+          KNMI_API_KEY: ${{ secrets.KNMI_API_KEY }}
+        run: python backfill.py "${{ github.event.inputs.date }}"
+      - name: Upload naar TransIP via SFTP
+        uses: wlixcc/SFTP-Deploy-Action@v1.2.4
+        with:
+          server: ${{ secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USER }}
+          password: ${{ secrets.FTP_PASS }}
+          port: 22
+          local_path: './out/*'
+          remote_path: 'www/'
